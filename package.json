@@ -1,0 +1,61 @@
+{
+  "name": "client",
+  "version": "1.0.0",
+  "description": "易聊通 - 鲜花闪购运营助手",
+  "main": "main/index.js",
+  "scripts": {
+    "start": "node launch.js",
+    "dev": "node launch.js --dev",
+    "build:win": "npx electron-builder --win --x64",
+    "build:mac": "npx electron-builder --mac",
+    "build:dir": "npx electron-builder --win --x64 --dir"
+  },
+  "config": {
+    "targetURL": "http://localhost:15000/",
+    "prodURL": "https://shangou.muchen.store"
+  },
+  "build": {
+    "appId": "com.mc.ylt",
+    "productName": "易聊通",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main/**/*",
+      "launch.js",
+      "node_modules/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "易聊通"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "易聊通"
+    }
+  },
+  "devDependencies": {
+    "electron": "^25.0.0",
+    "electron-builder": "^24.13.3"
+  }
+}

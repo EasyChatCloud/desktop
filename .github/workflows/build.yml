@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [x64]
+        # ia32 requires Electron <= 21
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --win --${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 易聊通-win-${{ matrix.arch }}
+          path: dist/*.exe
+          if-no-files-found: error
+
+  build-mac:
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [x64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: npm
+      - run: npm ci
+      - run: npx electron-builder --mac --${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: 易聊通-mac-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
