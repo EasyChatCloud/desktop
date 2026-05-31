@@ -1,6 +1,6 @@
 {
-  "name": "client",
-  "version": "1.0.0",
+  "name": "EasyChatDesktop",
+  "version": "1.0.1",
   "description": "易聊通 - 鲜花闪购运营助手",
   "main": "main/index.js",
   "scripts": {
@@ -12,10 +12,11 @@
   },
   "config": {
     "targetURL": "http://localhost:15000/",
-    "prodURL": "https://shangou.muchen.store"
+    "prodURL": "https://shangou.muchen.store",
+    "updateURL": "https://shangou.muchen.store/downloads/EasyChatDesktop/"
   },
   "build": {
-    "appId": "com.mc.ylt",
+    "appId": "com.mc.EasyChatDesktop",
     "productName": "易聊通",
     "directories": {
       "output": "dist"
@@ -31,7 +32,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -40,22 +43,32 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["universal"]
+          "arch": [
+            "universal"
+          ]
         }
       ]
     },
     "dmg": {
-      "title": "YiLiaoTong"
+      "title": "EasyChatDesktop"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "shortcutName": "易聊通"
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://shangou.muchen.store/downloads/EasyChat/"
     }
   },
   "devDependencies": {
     "electron": "^25.0.0",
     "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.3",
+    "whistle": "^2.10.2"
   }
 }

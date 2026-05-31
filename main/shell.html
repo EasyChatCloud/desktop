@@ -3,23 +3,65 @@
 <head>
 <meta charset="utf-8">
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
-    background: #282c34;
-    color: #ccc;
-    overflow: hidden;
-    user-select: none;
+  :root {
+    --bg:            #f8f9fb;
+    --tab-bar-bg:    #eaecf0;
+    --tab-active-bg: #ffffff;
+    --tab-hover-bg:  #dfe2e8;
+    --tab-inactive:  transparent;
+    --text-active:   #1a1d23;
+    --text-inactive: #6b7280;
+    --text-muted:    #9ca3af;
+    --accent:        #2563eb;
+    --accent-dim:    #93b4f5;
+    --border:        #dde0e5;
+    --divider:       #e5e7eb;
+    --close-color:   #9ca3af;
+    --close-hover-bg:#ef4444;
+    --close-hover-fg:#ffffff;
+    --scroll-shadow: rgba(0,0,0,0.06);
+    --new-tab-hover: #d1d5db;
+    --lock-color:    #f59e0b;
+    --tab-radius:    8px;
+    --tab-height:    34px;
+    --bar-height:    40px;
+    --accent-width:  2px;
+    --transition:    180ms cubic-bezier(0.4, 0, 0.2, 1);
   }
 
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                 'Microsoft YaHei', 'Helvetica Neue', sans-serif;
+    font-size: 12.5px;
+    background: var(--bg);
+    color: var(--text-active);
+    overflow: hidden;
+    user-select: none;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Tab Bar ── */
   #tab-bar {
     display: flex;
     align-items: center;
-    height: 38px;
-    background: #282c34;
-    border-bottom: 1px solid #3a3f4b;
+    height: var(--bar-height);
+    background: var(--tab-bar-bg);
+    border-bottom: 1px solid var(--border);
     -webkit-app-region: drag;
-    padding: 0 4px;
+    padding: 0 6px;
+    gap: 2px;
+  }
+
+  /* ── Scrollable Tab Strip ── */
+  #tabs-wrapper {
+    position: relative;
+    flex: 1;
+    overflow: hidden;
+    height: 100%;
+    display: flex;
+    align-items: flex-end;
   }
 
   #tabs {
@@ -29,95 +71,464 @@
     overflow-y: hidden;
     height: 100%;
     align-items: flex-end;
-    gap: 1px;
+    gap: 2px;
+    padding: 0 8px;
+    scroll-behavior: smooth;
   }
   #tabs::-webkit-scrollbar { height: 0; }
 
+  /* Scroll shadow indicators */
+  #tabs-wrapper.scrollable-left  #scroll-shadow-left  { opacity: 1; }
+  #tabs-wrapper.scrollable-right #scroll-shadow-right { opacity: 1; }
+
+  .scroll-shadow {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 24px;
+    pointer-events: none;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity var(--transition);
+  }
+  #scroll-shadow-left {
+    left: 0;
+    background: linear-gradient(to right, var(--tab-bar-bg) 0%, transparent 100%);
+  }
+  #scroll-shadow-right {
+    right: 28px; /* leave space for + button */
+    background: linear-gradient(to left, var(--tab-bar-bg) 0%, transparent 100%);
+  }
+
+  /* ── Individual Tab ── */
   .tab {
     display: flex;
     align-items: center;
+    gap: 5px;
     padding: 0 10px;
-    height: 32px;
-    min-width: 60px;
-    max-width: 160px;
-    background: #21252b;
-    color: #aaa;
-    border-radius: 6px 6px 0 0;
+    height: var(--tab-height);
+    min-width: 56px;
+    max-width: 172px;
+    background: var(--tab-inactive);
+    color: var(--text-inactive);
+    border-radius: var(--tab-radius) var(--tab-radius) 0 0;
     cursor: pointer;
-    font-size: 12px;
     white-space: nowrap;
     flex-shrink: 0;
     -webkit-app-region: no-drag;
-    transition: background 0.15s;
+    transition:
+      background var(--transition),
+      color var(--transition),
+      box-shadow var(--transition);
+    position: relative;
   }
-  .tab:hover { background: #2c313a; }
-  .tab.active { background: #fff; color: #282c34; }
+
+  /* Bottom accent line */
+  .tab::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 10px;
+    right: 10px;
+    height: var(--accent-width);
+    border-radius: 1px;
+    background: transparent;
+    transition: background var(--transition);
+  }
+
+  .tab:hover {
+    background: var(--tab-hover-bg);
+    color: var(--text-active);
+  }
+
+  .tab.active {
+    background: var(--tab-active-bg);
+    color: var(--text-active);
+    font-weight: 500;
+    box-shadow:
+      0 -1px 0 var(--border),
+      1px 0 0 var(--border),
+      -1px 0 0 var(--border);
+  }
+  .tab.active::after {
+    background: var(--accent);
+  }
+
+  /* Locked state */
+  .tab.locked {
+    cursor: default;
+  }
+  .tab.locked:hover {
+    background: var(--tab-inactive);
+    color: var(--text-inactive);
+  }
+  .tab.locked.active:hover {
+    background: var(--tab-active-bg);
+    color: var(--text-active);
+  }
+
+  /* ── Tab Content ── */
+  .tab .lock-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--lock-color);
+    flex-shrink: 0;
+    opacity: 0;
+    transform: scale(0);
+    transition:
+      opacity var(--transition),
+      transform var(--transition);
+  }
+  .tab.locked .lock-dot {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+
+  .tab .favicon {
+    width: 14px;
+    height: 14px;
+    border-radius: 2px;
+    flex-shrink: 0;
+    display: none;
+  }
 
   .tab .title {
     overflow: hidden;
     text-overflow: ellipsis;
     flex: 1;
-    text-align: center;
   }
 
-  .tab .close {
-    margin-left: 6px;
-    width: 16px;
-    height: 16px;
-    line-height: 16px;
+  .tab .close-btn {
+    margin-left: 2px;
+    width: 18px;
+    height: 18px;
+    line-height: 18px;
     text-align: center;
-    border-radius: 50%;
-    font-size: 11px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 300;
     color: transparent;
     flex-shrink: 0;
+    transition:
+      color var(--transition),
+      background var(--transition);
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .tab:hover .close { color: #888; }
-  .tab .close:hover { background: #666; color: #fff; }
+  .tab:hover .close-btn {
+    color: var(--close-color);
+  }
+  .tab .close-btn:hover {
+    background: var(--close-hover-bg);
+    color: var(--close-hover-fg);
+    border-radius: 4px;
+  }
 
+  /* ── New Tab Button ── */
+  #new-tab-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 18px;
+    font-weight: 300;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    -webkit-app-region: no-drag;
+    transition:
+      background var(--transition),
+      color var(--transition);
+    margin: 0 2px;
+  }
+  #new-tab-btn:hover {
+    background: var(--new-tab-hover);
+    color: var(--text-active);
+  }
+
+  /* ── Context Menu ── */
+  #context-menu {
+    display: none;
+    position: fixed;
+    z-index: 999;
+    min-width: 160px;
+    background: #ffffff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow:
+      0 4px 16px rgba(0,0,0,0.10),
+      0 0 0 1px rgba(0,0,0,0.04);
+    padding: 4px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  #context-menu.visible { display: block; }
+
+  .ctx-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: var(--text-active);
+    transition: background 120ms;
+  }
+  .ctx-item:hover { background: #f0f2f5; }
+  .ctx-item.danger { color: #ef4444; }
+  .ctx-item.danger:hover { background: #fef2f2; }
+  .ctx-separator {
+    height: 1px;
+    background: var(--divider);
+    margin: 3px 6px;
+  }
+  .ctx-shortcut {
+    margin-left: auto;
+    color: var(--text-muted);
+    font-size: 11px;
+  }
 </style>
 </head>
 <body>
-  <div id="tab-bar">
+
+<div id="tab-bar">
+  <div id="tabs-wrapper">
+    <div class="scroll-shadow" id="scroll-shadow-left"></div>
+    <div class="scroll-shadow" id="scroll-shadow-right"></div>
     <div id="tabs"></div>
   </div>
+  <button id="new-tab-btn" title="新建标签 (Ctrl+T)">+</button>
+</div>
 
-  <script>
-    const tabsEl = document.getElementById('tabs')
-    let tabs = []
-    let activeId = null
+<div id="context-menu">
+  <div class="ctx-item" data-action="switch"   ><span>🔄</span> 切换到该标签 <span class="ctx-shortcut">单击</span></div>
+  <div class="ctx-item" data-action="close"    ><span>✕</span> 关闭标签 <span class="ctx-shortcut">Ctrl+W</span></div>
+  <div class="ctx-separator"></div>
+  <div class="ctx-item" data-action="close-others"><span>🗂</span> 关闭其他标签</div>
+  <div class="ctx-item" data-action="close-right" ><span>📎</span> 关闭右侧标签</div>
+</div>
 
-    function render() {
-      tabsEl.innerHTML = ''
-      tabs.forEach(t => {
-        const el = document.createElement('div')
-        el.className = 'tab' + (t.id === activeId ? ' active' : '')
-        el.title = t.title || t.id
-        el.onclick = () => window.shellAPI.switchTab(t.id)
-        el.onauxclick = (e) => { if (e.button === 1) window.shellAPI.closeTab(t.id) }
+<script>
+  const tabsEl        = document.getElementById('tabs')
+  const wrapperEl     = document.getElementById('tabs-wrapper')
+  const shadowLeft    = document.getElementById('scroll-shadow-left')
+  const shadowRight   = document.getElementById('scroll-shadow-right')
+  const newTabBtn     = document.getElementById('new-tab-btn')
+  const contextMenu   = document.getElementById('context-menu')
 
-        const title = document.createElement('span')
-        title.className = 'title'
-        title.textContent = t.title || t.id
-        el.appendChild(title)
+  let tabs    = []
+  let activeId = null
+  let contextTabId = null
 
-        // Only session tabs get a close button
-        if (t.id !== '__home__') {
-          const close = document.createElement('span')
-          close.className = 'close'
-          close.textContent = '×'
-          close.onclick = (e) => { e.stopPropagation(); window.shellAPI.closeTab(t.id) }
-          el.appendChild(close)
+  // ── Render ──
+  function render() {
+    tabsEl.innerHTML = ''
+    tabs.forEach(t => {
+      const isActive = t.id === activeId
+      const isLocked = !!t.locked
+
+      const el = document.createElement('div')
+      el.className = 'tab' + (isActive ? ' active' : '') + (isLocked ? ' locked' : '')
+      el.title = (isLocked ? '弹窗已打开 · ' : '') + (t.title || t.id)
+      el.setAttribute('data-tab-id', t.id)
+
+      // Click: switch or focus popup
+      el.addEventListener('click', () => {
+        if (isLocked) {
+          window.shellAPI.focusPopup(t.id)
+        } else {
+          window.shellAPI.switchTab(t.id)
         }
-
-        tabsEl.appendChild(el)
+        hideContextMenu()
       })
-    }
 
-    window.shellAPI.onTabsUpdate((data) => {
-      tabs = data.tabs
-      activeId = data.activeId
-      render()
+      // Middle-click to close
+      el.addEventListener('auxclick', (e) => {
+        if (e.button === 1) {
+          e.preventDefault()
+          if (t.id !== '__home__') window.shellAPI.closeTab(t.id)
+        }
+      })
+
+      // Right-click context menu
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault()
+        contextTabId = t.id
+        showContextMenu(e.clientX, e.clientY, t)
+      })
+
+      // Lock indicator dot
+      const dot = document.createElement('span')
+      dot.className = 'lock-dot'
+      el.appendChild(dot)
+
+      // Title
+      const title = document.createElement('span')
+      title.className = 'title'
+      title.textContent = t.title || t.id
+      el.appendChild(title)
+
+      // Close button
+      if (t.id !== '__home__') {
+        const close = document.createElement('span')
+        close.className = 'close-btn'
+        close.innerHTML = '×'
+        close.addEventListener('click', (e) => {
+          e.stopPropagation()
+          window.shellAPI.closeTab(t.id)
+        })
+        close.addEventListener('mousedown', (e) => e.stopPropagation())
+        el.appendChild(close)
+      }
+
+      tabsEl.appendChild(el)
     })
-  </script>
+
+    updateScrollShadows()
+  }
+
+  // ── Scroll Shadows ──
+  function updateScrollShadows() {
+    const canScroll = tabsEl.scrollWidth > tabsEl.clientWidth
+    if (!canScroll) {
+      wrapperEl.classList.remove('scrollable-left', 'scrollable-right')
+      return
+    }
+    if (tabsEl.scrollLeft > 2) {
+      wrapperEl.classList.add('scrollable-left')
+    } else {
+      wrapperEl.classList.remove('scrollable-left')
+    }
+    if (tabsEl.scrollLeft + tabsEl.clientWidth < tabsEl.scrollWidth - 2) {
+      wrapperEl.classList.add('scrollable-right')
+    } else {
+      wrapperEl.classList.remove('scrollable-right')
+    }
+  }
+
+  tabsEl.addEventListener('scroll', updateScrollShadows)
+  window.addEventListener('resize', updateScrollShadows)
+
+  // ── Auto-scroll active tab into view ──
+  function scrollToActive() {
+    const el = tabsEl.querySelector(`[data-tab-id="${activeId}"]`)
+    if (el) {
+      el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' })
+    }
+  }
+
+  // ── Context Menu ──
+  function showContextMenu(x, y, tab) {
+    // Edge-aware positioning
+    const menuW = 170
+    const menuH = 130
+    const mx = Math.min(x, window.innerWidth - menuW - 4)
+    const my = Math.min(y, window.innerHeight - menuH - 4)
+    contextMenu.style.left = Math.max(4, mx) + 'px'
+    contextMenu.style.top  = Math.max(4, my) + 'px'
+    contextMenu.classList.add('visible')
+
+    // Update menu items based on tab state
+    const items = contextMenu.querySelectorAll('.ctx-item[data-action]')
+    items.forEach(item => {
+      const action = item.getAttribute('data-action')
+      if (action === 'switch' && tab.locked) {
+        item.querySelector('span:first-child').textContent = '🔒'
+        item.childNodes[item.childNodes.length - 1].textContent = '聚焦弹窗'
+      } else if (action === 'switch') {
+        item.querySelector('span:first-child').textContent = '🔄'
+        item.childNodes[item.childNodes.length - 1].textContent = '单击'
+      }
+    })
+  }
+
+  function hideContextMenu() {
+    contextMenu.classList.remove('visible')
+    contextTabId = null
+  }
+
+  contextMenu.addEventListener('click', (e) => {
+    const item = e.target.closest('.ctx-item[data-action]')
+    if (!item || !contextTabId) return hideContextMenu()
+
+    const action = item.getAttribute('data-action')
+    const tab = tabs.find(t => t.id === contextTabId)
+    if (!tab) return hideContextMenu()
+
+    switch (action) {
+      case 'switch':
+        if (tab.locked) window.shellAPI.focusPopup(contextTabId)
+        else window.shellAPI.switchTab(contextTabId)
+        break
+      case 'close':
+        if (contextTabId !== '__home__') window.shellAPI.closeTab(contextTabId)
+        break
+      case 'close-others':
+        tabs.forEach(t => {
+          if (t.id !== contextTabId && t.id !== '__home__') {
+            window.shellAPI.closeTab(t.id)
+          }
+        })
+        break
+      case 'close-right': {
+        const idx = tabs.findIndex(t => t.id === contextTabId)
+        tabs.slice(idx + 1).forEach(t => {
+          if (t.id !== '__home__') window.shellAPI.closeTab(t.id)
+        })
+        break
+      }
+    }
+    hideContextMenu()
+  })
+
+  // Click outside to dismiss
+  document.addEventListener('click', (e) => {
+    if (!contextMenu.contains(e.target)) hideContextMenu()
+  })
+
+  // ── Keyboard Shortcuts ──
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey && e.key === 't') {
+      e.preventDefault()
+      window.shellAPI.newTab()
+    }
+    if (e.ctrlKey && e.key === 'w') {
+      e.preventDefault()
+      if (activeId && activeId !== '__home__') {
+        window.shellAPI.closeTab(activeId)
+      }
+    }
+    if (e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault()
+      const idx = tabs.findIndex(t => t.id === activeId)
+      const next = e.shiftKey
+        ? tabs[(idx - 1 + tabs.length) % tabs.length]
+        : tabs[(idx + 1) % tabs.length]
+      if (next) {
+        if (next.locked) window.shellAPI.focusPopup(next.id)
+        else window.shellAPI.switchTab(next.id)
+      }
+    }
+  })
+
+  // ── New Tab Button ──
+  newTabBtn.addEventListener('click', () => {
+    window.shellAPI.newTab()
+  })
+
+  // ── Tab Updates ──
+  window.shellAPI.onTabsUpdate((data) => {
+    tabs = data.tabs
+    activeId = data.activeId
+    render()
+    setTimeout(scrollToActive, 20)
+  })
+</script>
 </body>
 </html>

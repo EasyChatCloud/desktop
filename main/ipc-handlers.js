@@ -3,11 +3,12 @@ const path = require('path')
 const sessions = require('./sessions')
 
 const HOME_TAB_ID = '__home__'
-const TAB_BAR_HEIGHT = 38
+const TAB_BAR_HEIGHT = 40
 
 const tabViews = new Map()
 const cookieWatchers = new Map()
 const sentSnapshots = new Map()
+const popupWindows = new Map()  // parentSessionId -> BrowserWindow
 const tabOrder = []
 let activeTabId = null
 let mainWindow = null
@@ -188,35 +189,43 @@ function broadcastTabs() {
     if (!data) return null
     return {
       id,
-      title: data.type === 'home' ? '主页' : (data.sessionId || extractDomain(data.url)),
+      title: data.type === 'home' ? '主页' : (data.title || data.sessionId || extractDomain(data.url)),
       type: data.type,
-      sessionId: data.sessionId
+      sessionId: data.sessionId,
+      locked: !!(data.sessionId && popupWindows.has(data.sessionId))
     }
   }).filter(Boolean)
 
   mainWindow.webContents.send('shell:tabs', { tabs, activeId: activeTabId })
 }
 
-async function createHomeView() {
+function createHomeViewForTab(tabId) {
   const ses = session.defaultSession
   const webPreferences = getHomeWebPreferences(ses)
   const view = new BrowserView({ webPreferences })
 
   mainWindow.addBrowserView(view)
-  setupViewEvents(view, HOME_TAB_ID)
-
+  setupViewEvents(view, tabId)
   view.webContents.loadURL(homeUrl)
 
-  tabViews.set(HOME_TAB_ID, { view, type: 'home', url: homeUrl, originalUrl: homeUrl })
-  tabOrder.push(HOME_TAB_ID)
-  activeTabId = HOME_TAB_ID
-  updateViewBounds(view)
+  tabViews.set(tabId, { view, type: 'home', url: homeUrl, originalUrl: homeUrl })
+  tabOrder.push(tabId)
+  activeTabId = tabId
+  showView(tabId)
   broadcastTabs()
 
   return view
 }
 
-async function createSessionView(sessionId, url) {
+async function createHomeView() {
+  const view = createHomeViewForTab(HOME_TAB_ID)
+  // Wire capture push target to the home BrowserView
+  const capture = require('./capture')
+  capture.setHomeWebContents(view.webContents)
+  return view
+}
+
+async function createSessionView(sessionId, url, title) {
   const ses = sessionPartition(sessionId)
   const domain = extractDomain(url)
   const webPreferences = getWebPreferences(ses, domain)
@@ -229,7 +238,7 @@ async function createSessionView(sessionId, url) {
 
   view.webContents.loadURL(url)
 
-  tabViews.set(sessionId, { view, type: 'session', sessionId, url, originalUrl: url })
+  tabViews.set(sessionId, { view, type: 'session', sessionId, url, originalUrl: url, title: title || sessionId })
   tabOrder.push(sessionId)
   activeTabId = sessionId
   showView(sessionId)
@@ -243,6 +252,21 @@ function closeTab(tabId) {
 
   const data = tabViews.get(tabId)
   if (!data) return
+
+  // Close associated popup first (cleanup deferred to closed event handler)
+  if (data.sessionId && popupWindows.has(data.sessionId)) {
+    const popupWin = popupWindows.get(data.sessionId)
+    if (popupWin && !popupWin.isDestroyed()) {
+      popupWin.close()
+    }
+  }
+
+  // Destroy view contents before removing (stops audio/video, JS, network)
+  try {
+    data.view.webContents.stop()
+    data.view.webContents.setAudioMuted(true)
+    data.view.webContents.loadURL('about:blank')
+  } catch (_) {}
 
   try { mainWindow.removeBrowserView(data.view) } catch (_) {}
 
@@ -278,27 +302,133 @@ function switchTab(tabId) {
   broadcastTabs()
 }
 
+// ---- Popup Window ----
+
+function createPopupWindow(sessionId, url, title) {
+  // If popup already exists for this session, focus it
+  if (popupWindows.has(sessionId)) {
+    const win = popupWindows.get(sessionId)
+    if (win && !win.isDestroyed()) {
+      win.focus()
+      return { action: 'focused', sessionId }
+    }
+    // Window was destroyed, clean up tracking
+    popupWindows.delete(sessionId)
+  }
+
+  const ses = sessionPartition(sessionId)
+  const domain = extractDomain(url)
+  const webPreferences = getWebPreferences(ses, domain)
+
+  // Ensure electronAPI is available in popup for normal (non-anti-detection) sites
+  if (!webPreferences.preload) {
+    webPreferences.preload = path.join(__dirname, 'preload.js')
+    webPreferences.contextIsolation = true
+    webPreferences.sandbox = true
+  }
+
+  const popupTitle = title || sessionId
+  const popupWin = new BrowserWindow({
+    width: 1920,
+    height: 1080,
+    title: popupTitle,
+    parent: mainWindow,
+    webPreferences
+  })
+
+  popupWin.setMenuBarVisibility(false)
+  popupWin.webContents.setAudioMuted(true)
+  popupWin.maximize()
+
+  // Set Chrome UA to match tab sessions
+  ses.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  )
+
+  popupWin.webContents.loadURL(url)
+
+  // Track relationship
+  popupWindows.set(sessionId, popupWin)
+
+  // Setup cookie watching from popup's session
+  watchCookies(sessionId)
+
+  popupWin.webContents.on('did-finish-load', () => {
+    pushCookies(sessionId)
+  })
+
+  // Force-stop media/JS when popup is closing
+  popupWin.on('close', () => {
+    try {
+      popupWin.webContents.stop()
+      popupWin.webContents.setAudioMuted(true)
+    } catch (_) {}
+  })
+
+  // On popup closed, clean up tracking
+  popupWin.on('closed', () => {
+    popupWindows.delete(sessionId)
+    broadcastTabs()
+    // If the parent was active, re-show it
+    if (activeTabId === sessionId && tabViews.has(sessionId)) {
+      showView(sessionId)
+    }
+  })
+
+  broadcastTabs()
+  return { action: 'popup-created', sessionId }
+}
+
 // ---- IPC Handlers ----
 
-async function handleSwitch(_, sessionId, url) {
+async function handleSwitch(_, sessionId, url, opts = {}) {
+  const method = opts.method || 'tab'
+  const title = opts.title || null
+
+  // --- Pop-up mode ---
+  if (method === 'pop-up') {
+    // Ensure session exists in metadata (for partition tracking)
+    const existing = sessions.get(sessionId)
+    if (!existing) {
+      sessions.create(sessionId, url)
+    }
+    // Do NOT create a tab — the popup window IS the view for this session.
+    // If a tab already exists for this session, it stays and gets locked.
+    const popupUrl = url || (existing && existing.url)
+    if (!popupUrl) {
+      return { success: false, reason: 'url required for pop-up' }
+    }
+    return createPopupWindow(sessionId, popupUrl, title)
+  }
+
+  // --- Tab mode (default) ---
   const existing = sessions.get(sessionId)
 
   if (existing) {
     if (tabViews.has(sessionId)) {
-      switchTab(sessionId)
+      switchTab(sessionId)  // switchTab already calls setActive + pushCookies
     } else {
-      await createSessionView(sessionId, url || existing.url)
+      await createSessionView(sessionId, url || existing.url, title)
+      sessions.setActive(sessionId)
+      pushCookies(sessionId)
     }
-    sessions.setActive(sessionId)
-    pushCookies(sessionId)
     return { action: 'switched', sessionId }
   }
 
+  // sessions.create already sets activeSessionId
   sessions.create(sessionId, url)
-  await createSessionView(sessionId, url)
-  sessions.setActive(sessionId)
+  await createSessionView(sessionId, url, title)
   setTimeout(() => pushCookies(sessionId), 1000)
   return { action: 'created', sessionId }
+}
+
+async function handleClosePopup(_, sessionId) {
+  const popupWin = popupWindows.get(sessionId)
+  if (popupWin && !popupWin.isDestroyed()) {
+    popupWin.close()
+    return { success: true, sessionId }
+  }
+  return { success: false, reason: 'popup not found' }
 }
 
 async function handleSetSession(_, oldName, newName) {
@@ -316,9 +446,14 @@ async function handleSetSession(_, oldName, newName) {
     closeTab(newName)
   }
 
-  // If newName exists in metadata, remove it
-  if (sessions.get(newName)) {
-    sessions.remove(newName)
+  // If newName exists in metadata, remove it (remove() no-ops if absent)
+  sessions.remove(newName)
+
+  // Transfer popup relationship
+  if (popupWindows.has(oldName)) {
+    const popupWin = popupWindows.get(oldName)
+    popupWindows.delete(oldName)
+    popupWindows.set(newName, popupWin)
   }
 
   // Just remap: oldName's partition → newName
@@ -354,6 +489,14 @@ async function handleStop(_, eventType, sessionId) {
 // ---- Shell IPC Handlers ----
 
 function handleShellSwitchTab(_, tabId) {
+  // If tab is locked by a popup, focus the popup instead
+  if (popupWindows.has(tabId)) {
+    const popupWin = popupWindows.get(tabId)
+    if (popupWin && !popupWin.isDestroyed()) {
+      popupWin.focus()
+    }
+    return
+  }
   switchTab(tabId)
 }
 
@@ -363,21 +506,14 @@ function handleShellCloseTab(_, tabId) {
 }
 
 function handleShellNewTab() {
-  const id = `tab-${Date.now()}`
-  const ses = session.defaultSession
-  const webPreferences = getHomeWebPreferences(ses)
-  const view = new BrowserView({ webPreferences })
+  createHomeViewForTab(`tab-${Date.now()}`)
+}
 
-  mainWindow.addBrowserView(view)
-  setupViewEvents(view, id)
-
-  view.webContents.loadURL(homeUrl)
-
-  tabViews.set(id, { view, type: 'home', url: homeUrl, originalUrl: homeUrl })
-  tabOrder.push(id)
-  activeTabId = id
-  showView(id)
-  broadcastTabs()
+function handleShellFocusPopup(_, tabId) {
+  const popupWin = popupWindows.get(tabId)
+  if (popupWin && !popupWin.isDestroyed()) {
+    popupWin.focus()
+  }
 }
 
 function handleShellMinimize() {
@@ -408,10 +544,12 @@ function register(ipcMain) {
   ipcMain.handle('switch', handleSwitch)
   ipcMain.handle('setSession', handleSetSession)
   ipcMain.handle('stop', handleStop)
+  ipcMain.handle('closePopup', handleClosePopup)
 
   ipcMain.on('shell:switch-tab', handleShellSwitchTab)
   ipcMain.on('shell:close-tab', handleShellCloseTab)
   ipcMain.on('shell:new-tab', handleShellNewTab)
+  ipcMain.on('shell:focus-popup', handleShellFocusPopup)
   ipcMain.on('shell:minimize', handleShellMinimize)
   ipcMain.on('shell:maximize', handleShellMaximize)
   ipcMain.on('shell:close', handleShellClose)
