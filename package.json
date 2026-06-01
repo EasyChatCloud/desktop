@@ -44,6 +44,9 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": {
+        "teamId": "UXWU9M7GTB"
+      },
       "target": [
         {
           "target": "dmg",
@@ -57,7 +60,6 @@
       "title": "EasyChatDesktop",
       "sign": false
     },
-    "afterSign": "build/notarize.js",
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
