@@ -21,13 +21,21 @@ jobs:
           node-version: 18
           cache: npm
       - run: npm ci
-      - run: npx electron-builder --win --x64 --publish never
+      - name: Build Windows
+        run: |
+          if ("${{ github.ref }}" -like "refs/tags/v*") {
+            npx electron-builder --win --x64
+          } else {
+            npx electron-builder --win --x64 --publish never
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - uses: actions/upload-artifact@v4
         with:
           name: 易聊通-win-x64
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
           if-no-files-found: error
 
   build-mac:
@@ -55,17 +63,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tmp1234 build.keychain
           rm dev-id-app.p12
 
-      # Import Developer ID Installer certificate
-      - name: Import Developer ID Installer cert
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_INSTALLER_BASE64 }}
-          CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-        run: |
-          echo "$CERT_BASE64" | base64 --decode > dev-id-inst.p12
-          security import dev-id-inst.p12 -k build.keychain -P "$CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
-          rm dev-id-inst.p12
-
       # Build & sign (tags: sign + notarize, PRs: unsigned)
       - name: Build macOS
         env:
@@ -84,5 +81,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: 易聊通-mac
-          path: dist/*.dmg
+          path: |
+            dist/*.dmg
+            dist/latest-mac.yml
           if-no-files-found: error
