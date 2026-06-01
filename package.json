@@ -1,7 +1,7 @@
 {
   "name": "EasyChatDesktop",
   "version": "1.0.1",
-  "description": "易聊通 - 鲜花闪购运营助手",
+  "description": "易畅聊 - 鲜花闪购运营助手",
   "main": "main/index.js",
   "scripts": {
     "start": "node launch.js",
@@ -17,7 +17,7 @@
   },
   "build": {
     "appId": "com.mc.EasyChatDesktop",
-    "productName": "易聊通",
+    "productName": "易畅聊",
     "directories": {
       "output": "dist"
     },
@@ -40,6 +40,10 @@
     },
     "mac": {
       "icon": "build/icon.png",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
         {
           "target": "dmg",
@@ -50,13 +54,15 @@
       ]
     },
     "dmg": {
-      "title": "EasyChatDesktop"
+      "title": "EasyChatDesktop",
+      "sign": false
     },
+    "afterSign": "build/notarize.js",
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "易聊通"
+      "shortcutName": "易畅聊"
     },
     "publish": {
       "provider": "generic",
@@ -64,6 +70,7 @@
     }
   },
   "devDependencies": {
+    "@electron/notarize": "^3.1.1",
     "electron": "^25.0.0",
     "electron-builder": "^24.13.3"
   },

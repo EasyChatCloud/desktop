@@ -10,6 +10,7 @@ let homeWebContents = null
 let whistleServer = null
 let whistleWebPath = ''     // whistle's random WEBUI_PATH for API calls
 let pollTimer = null
+let statsWs = null
 let originalProxy = null
 let captureActive = false
 let capturePort = 0
@@ -39,22 +40,26 @@ function clearStateFile() {
 }
 
 function recoverFromCrash() {
-  // 1. Kill any zombie electron processes holding our ports
+  // 1. Kill any zombie processes holding our port range (8000-8020)
   safeExec(() => {
     try {
-      const out = execSync(`netstat -ano | findstr "127.0.0.1:800"`, { encoding: 'utf8', timeout: 3000 })
-      const pids = new Set()
-      out.split('\n').forEach(line => {
-        const m = line.match(/LISTENING\s+(\d+)/)
-        if (m) pids.add(m[1])
-      })
-      pids.forEach(pid => {
-        const taskOut = execSync(`tasklist /FI "PID eq ${pid}"`, { encoding: 'utf8', timeout: 3000 })
-        if (taskOut.includes('electron.exe')) {
-          console.log('[capture] killing zombie electron PID:', pid)
-          execSync(`taskkill /F /PID ${pid}`, { encoding: 'utf8', timeout: 5000 })
-        }
-      })
+      // Check each port individually to catch all processes in our range
+      for (let port = 8000; port <= 8020; port++) {
+        try {
+          const out = execSync(`netstat -ano | findstr "127.0.0.1:${port}"`, { encoding: 'utf8', timeout: 3000 })
+          const pids = new Set()
+          out.split('\n').forEach(line => {
+            const m = line.match(/LISTENING\s+(\d+)/)
+            if (m) pids.add(m[1])
+          })
+          pids.forEach(pid => {
+            // Kill ANY process holding our ports (not just electron.exe)
+            // Whistle children from previous runs may not have electron.exe as the name
+            console.log('[capture] killing zombie process on port', port, 'PID:', pid)
+            execSync(`taskkill /F /PID ${pid}`, { encoding: 'utf8', timeout: 5000 })
+          })
+        } catch (_) {}
+      }
     } catch (_) {}
   })
 
@@ -378,38 +383,63 @@ async function startCapture(urls) {
       try {
         const result = await new Promise((resolve, reject) => {
           let settled = false
+          let errorListener = null
           const srv = whistle({
             port: tryPort,
             baseDir: path.join(app.getPath('userData'), 'whistle-data'),
             copy: true,
             debug: false
-          }, (result) => {
+          }, (cbResult) => {
             if (settled) return
             settled = true
-            if (result && result.server) { resolve(result); return }
-            if (result instanceof Error) { reject(result); return }
-            resolve(result || srv)
+            if (errorListener) srv.server.removeListener('error', errorListener)
+            if (cbResult && cbResult.server) {
+              resolve(cbResult)
+            } else if (cbResult instanceof Error) {
+              reject(cbResult)
+            } else {
+              resolve(cbResult || srv)
+            }
           })
-          srv.on('error', (err) => {
+          // Listen for errors on BOTH srv (EventEmitter) AND srv.server (HTTP server)
+          errorListener = (err) => {
             if (settled) return
             settled = true
             reject(err)
-          })
+          }
+          srv.on('error', errorListener)
+          // Also listen on the HTTP server directly (whistle's callback only fires on success)
+          if (srv.server) {
+            srv.server.on('error', errorListener)
+          }
           setTimeout(() => {
             if (settled) return
+            // Timeout — server didn't start (port likely occupied)
             settled = true
-            resolve(srv)
-          }, 3000)
+            reject(new Error('EADDRINUSE port ' + tryPort))
+          }, 8000)
         })
-        // Success
-        const proxyServer = (result && result.server) ? result.server : result
-        const addr = (proxyServer.address && proxyServer.address()) || {}
-        port = addr.port || tryPort
+        // Success — verify server is actually listening
+        const serverObj = (result && result.server) ? result.server : result
+        const addr = (serverObj && serverObj.address && serverObj.address()) || null
+        if (!addr || !addr.port) {
+          throw new Error('server started but address unavailable on port ' + tryPort)
+        }
+        port = addr.port
         capturePort = port
         whistleServer = result
         // Save whistle's random web UI path for API polling
         whistleWebPath = (result && result.config && result.config.WEBUI_PATH) || ''
         console.log('[capture] whistle started on port', port, 'web path:', whistleWebPath)
+
+        // 8.5 Enable HTTPS interception (auto)
+        safeExec(() => {
+          if (whistleServer && whistleServer.rulesUtil) {
+            whistleServer.rulesUtil.addRules('* enableHttps', false)
+            console.log('[capture] HTTPS interception enabled via rules')
+          }
+        })
+
         break
       } catch (e) {
         const code = (e && (e.code || e.message)) ? (e.code || e.message) : String(e)
@@ -480,9 +510,17 @@ async function stopCapture() {
   pushMessage('正在恢复系统代理...')
   restoreSystemProxy()
 
-  // Stop whistle
+  // Stop whistle — close actual HTTP/HTTPS servers, not the EventEmitter wrapper
   if (whistleServer) {
-    safeExec(() => whistleServer.close())
+    const servers = []
+    if (whistleServer.server) servers.push(whistleServer.server)
+    if (whistleServer.httpsServer) servers.push(whistleServer.httpsServer)
+    servers.forEach(srv => {
+      safeExec(() => {
+        srv.close()
+        console.log('[capture] server closed')
+      })
+    })
     whistleServer = null
   }
 
@@ -507,7 +545,13 @@ function destroy() {
     restoreSystemProxy()  // MUST restore before exit
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
     if (statsWs) { try { statsWs.stop() } catch (_) {}; statsWs = null }
-    if (whistleServer) { safeExec(() => whistleServer.close()); whistleServer = null }
+    if (whistleServer && whistleServer.server) {
+      safeExec(() => { whistleServer.server.close(); console.log('[capture] server closed (destroy)') })
+      if (whistleServer.httpsServer) {
+        safeExec(() => whistleServer.httpsServer.close())
+      }
+      whistleServer = null
+    }
     clearStateFile()
   }
 }

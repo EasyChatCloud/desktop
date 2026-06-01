@@ -152,10 +152,14 @@ function setupViewEvents(view, tabId) {
 
   if (tabId !== HOME_TAB_ID) {
     view.webContents.on('did-navigate', (_, navUrl) => {
-      mainWindow.webContents.send('shell:tab-title', { id: tabId, title: extractDomain(navUrl) || navUrl })
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+        mainWindow.webContents.send('shell:tab-title', { id: tabId, title: extractDomain(navUrl) || navUrl })
+      }
     })
     view.webContents.on('page-title-updated', (_, title) => {
-      mainWindow.webContents.send('shell:tab-title', { id: tabId, title })
+      if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents) {
+        mainWindow.webContents.send('shell:tab-title', { id: tabId, title })
+      }
     })
   }
 }
