@@ -2,12 +2,14 @@
 // Called by electron-builder after the .app is signed, before DMG packaging.
 // Requires: APPLE_ID, APPLE_TEAM_ID, APPLE_APP_SPECIFIC_PASSWORD env vars
 
-const { notarize } = require('@electron/notarize')
 const path = require('path')
 
 exports.default = async function notarizing(context) {
   const { electronPlatformName, appOutDir } = context
   if (electronPlatformName !== 'darwin') return
+
+  // Dynamic import — @electron/notarize v3 is ESM-only
+  const { notarize } = await import('@electron/notarize')
 
   const appName = context.packager.appInfo.productFilename
   const appPath = path.join(appOutDir, `${appName}.app`)
