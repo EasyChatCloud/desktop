@@ -168,28 +168,6 @@ function restoreSystemProxy() {
   console.log('[capture] system proxy restored')
 }
 
-// ====== Certificate ======
-
-function installCert(certPath) {
-  if (!certPath || !fs.existsSync(certPath)) return false
-
-  if (isWin) {
-    // Auto-install to user's Trusted Root store (no UI)
-    const ok = safeExec(() => {
-      execSync(`certutil -addstore -user Root "${certPath}"`, { encoding: 'utf8', timeout: 10000 })
-      return true
-    }, false)
-    if (ok) {
-      console.log('[capture] cert auto-installed')
-      return true
-    }
-  }
-  // Fallback: manual via OS wizard
-  shell.openPath(certPath)
-  console.log('[capture] cert manual install opened')
-  return true
-}
-
 // ====== Data Push (to page BrowserView via IPC) ======
 
 function pushMessage(message) {
@@ -331,29 +309,91 @@ function truncateBody(body, maxLen) {
   return str.slice(0, maxLen) + `... [TRUNCATED ${str.length - maxLen} bytes]`
 }
 
-// ====== HTTPS Interception API ======
+// ====== Certificate ======
 
-function enableInterceptHttps(port) {
-  const postData = `clientId=${Date.now()}-1&interceptHttpsConnects=1`
-  const req = http.request({
-    hostname: '127.0.0.1',
-    port,
-    path: '/cgi-bin/intercept-https-connects',
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
-      'Content-Length': Buffer.byteLength(postData)
+function isCertInstalled(certPath) {
+  if (!certPath || !fs.existsSync(certPath)) return false
+  if (isWin) {
+    // certutil -verifystore checks if the cert is already in the store
+    return safeExec(() => {
+      const thumbprint = getCertThumbprint(certPath)
+      if (!thumbprint) return false
+      execSync(`certutil -verifystore -user Root "${thumbprint}"`, { encoding: 'utf8', timeout: 5000 })
+      return true
+    }, false)
+  }
+  // macOS: check if cert is in login keychain
+  return safeExec(() => {
+    const cn = getCertCN(certPath)
+    if (!cn) return false
+    execSync(`security find-certificate -c "${cn}" -p /Library/Keychains/System.keychain`, { encoding: 'utf8', timeout: 5000 })
+    return true
+  }, false)
+}
+
+function getCertThumbprint(certPath) {
+  return safeExec(() => {
+    const out = execSync(`certutil -hashfile "${certPath}" SHA1`, { encoding: 'utf8', timeout: 5000 })
+    // certutil hashfile outputs: SHA1 hash of <file>: \n<hash>\n
+    const lines = out.split('\n').map(l => l.trim()).filter(Boolean)
+    return lines[1] || ''
+  }, '')
+}
+
+function getCertCN(certPath) {
+  return safeExec(() => {
+    const out = execSync(`openssl x509 -in "${certPath}" -noout -subject`, { encoding: 'utf8', timeout: 5000 })
+    const m = out.match(/CN\s*=\s*([^\n\/]+)/)
+    return m ? m[1].trim() : ''
+  }, '')
+}
+
+function installCert(certPath) {
+  if (!certPath || !fs.existsSync(certPath)) return false
+
+  // Already installed
+  if (isCertInstalled(certPath)) {
+    console.log('[capture] cert already installed')
+    return true
+  }
+
+  if (isWin) {
+    // Auto-install to user's Trusted Root store (no UI)
+    const ok = safeExec(() => {
+      execSync(`certutil -addstore -user Root "${certPath}"`, { encoding: 'utf8', timeout: 10000 })
+      return true
+    }, false)
+    if (ok) {
+      console.log('[capture] cert auto-installed')
+      return true
     }
-  }, (res) => {
-    let body = ''
-    res.on('data', chunk => { body += chunk })
-    res.on('end', () => {
-      console.log('[capture] intercept-https-connects API response:', res.statusCode, body.trim())
-    })
+  }
+  // Fallback: manual via OS wizard
+  shell.openPath(certPath)
+  console.log('[capture] cert manual install opened')
+  return true
+}
+
+// ====== HTTPS Interception ======
+
+function enableInterceptHttps(server) {
+  if (!server || !server.rulesUtil) {
+    console.error('[capture] rulesUtil not available on whistle server')
+    return false
+  }
+  return safeExec(() => {
+    server.rulesUtil.addRules('* enableHttps', false)
+    console.log('[capture] HTTPS interception enabled via rules')
+    return true
+  }, false)
+}
+
+function disableInterceptHttps(server) {
+  if (!server || !server.rulesUtil) return
+  safeExec(() => {
+    server.rulesUtil.addRules('', true)  // empty rule = disable
+    console.log('[capture] HTTPS interception disabled')
   })
-  req.on('error', (e) => console.error('[capture] intercept-https-connects API error:', e.message))
-  req.write(postData)
-  req.end()
 }
 
 // ====== Core API ======
@@ -392,10 +432,9 @@ async function startCapture(urls) {
   // Write state file for crash recovery
   writeStateFile()
 
-  // 4. Check certificate — whistle uses its own default dir, not our certDir option
+  // 4. Certificate path — whistle uses its own default dir, not our certDir option
   const whistleHome = path.join(require('os').homedir(), '.WhistleAppData', '.whistle', 'certs')
   const certPath = path.join(whistleHome, 'root.crt')
-  const certExists = fs.existsSync(certPath)
 
   // 5. Start whistle on first available port in 8000-8020
   pushMessage('正在启动代理服务...')
@@ -476,8 +515,8 @@ async function startCapture(urls) {
         whistleWebPath = (result && result.config && result.config.WEBUI_PATH) || ''
         console.log('[capture] whistle started on port', port, 'web path:', whistleWebPath)
 
-        // Enable HTTPS interception via Whistle API
-        enableInterceptHttps(port)
+        // Enable HTTPS interception via whistle rules API
+        enableInterceptHttps(result)
 
         break
       } catch (e) {
@@ -502,18 +541,23 @@ async function startCapture(urls) {
   else setMacProxy(port)
   console.log('[capture] system proxy set to 127.0.0.1:' + port)
 
-  // 7. Certificate — auto-install via certutil if needed
-  let certOk = certExists
-  if (!certExists) {
-    pushMessage('正在生成证书...')
-    await new Promise(r => setTimeout(r, 1500))
+  // 7. Certificate — ensure root CA is installed in system trust store
+  let certOk = isCertInstalled(certPath)
+  if (!certOk) {
+    // Give whistle time to generate the cert if it doesn't exist yet
+    if (!fs.existsSync(certPath)) {
+      pushMessage('正在生成证书...')
+      await new Promise(r => setTimeout(r, 2000))
+    }
     if (fs.existsSync(certPath)) {
       pushMessage('正在安装证书...')
       certOk = installCert(certPath)
       pushMessage(certOk ? '证书安装成功' : '证书安装失败，请手动安装')
     } else {
-      pushMessage('证书生成失败')
+      pushMessage('证书生成失败，请检查 Whistle 是否正常启动')
     }
+  } else {
+    console.log('[capture] root cert already installed')
   }
 
   // 8. Start polling (wrapped — won't crash the flow)
@@ -544,6 +588,11 @@ async function stopCapture() {
   // Stop polling first
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   if (statsWs) { try { statsWs.stop() } catch (_) {}; statsWs = null }
+
+  // Disable HTTPS interception rules
+  if (whistleServer) {
+    disableInterceptHttps(whistleServer)
+  }
 
   // Restore system proxy — CRITICAL, must succeed
   pushMessage('正在恢复系统代理...')
