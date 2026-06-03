@@ -376,24 +376,27 @@ function installCert(certPath) {
 
 // ====== HTTPS Interception ======
 
-function enableInterceptHttps(server) {
-  if (!server || !server.rulesUtil) {
-    console.error('[capture] rulesUtil not available on whistle server')
-    return false
-  }
-  return safeExec(() => {
-    server.rulesUtil.addRules('* enableHttps', false)
-    console.log('[capture] HTTPS interception enabled via rules')
-    return true
-  }, false)
-}
-
-function disableInterceptHttps(server) {
-  if (!server || !server.rulesUtil) return
-  safeExec(() => {
-    server.rulesUtil.addRules('', true)  // empty rule = disable
-    console.log('[capture] HTTPS interception disabled')
+function enableInterceptHttps(port) {
+  const postData = `clientId=${Date.now()}-1&interceptHttpsConnects=1`
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port,
+    path: '/cgi-bin/intercept-https-connects',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  }, (res) => {
+    let body = ''
+    res.on('data', chunk => { body += chunk })
+    res.on('end', () => {
+      console.log('[capture] intercept-https-connects response:', res.statusCode, body.trim())
+    })
   })
+  req.on('error', (e) => console.error('[capture] intercept-https-connects error:', e.message))
+  req.write(postData)
+  req.end()
 }
 
 // ====== Core API ======
@@ -515,8 +518,8 @@ async function startCapture(urls) {
         whistleWebPath = (result && result.config && result.config.WEBUI_PATH) || ''
         console.log('[capture] whistle started on port', port, 'web path:', whistleWebPath)
 
-        // Enable HTTPS interception via whistle rules API
-        enableInterceptHttps(result)
+        // Enable HTTPS interception via Whistle CGI API
+        enableInterceptHttps(port)
 
         break
       } catch (e) {
@@ -588,11 +591,6 @@ async function stopCapture() {
   // Stop polling first
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
   if (statsWs) { try { statsWs.stop() } catch (_) {}; statsWs = null }
-
-  // Disable HTTPS interception rules
-  if (whistleServer) {
-    disableInterceptHttps(whistleServer)
-  }
 
   // Restore system proxy — CRITICAL, must succeed
   pushMessage('正在恢复系统代理...')
