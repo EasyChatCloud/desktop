@@ -1,4 +1,4 @@
-# EasyChatDesktop
+# ZhiDuoDesktop
 
 基于 Electron 的多会话浏览器，标签页管理，Session 级别 Cookie 隔离 + 实时推送 + 抓包。
 
@@ -220,12 +220,12 @@ await window.electronAPI.capture.stop()
 
 ## 自动更新
 
-应用启动后自动检查 `https://shangou.muchen.store/downloads/EasyChatDesktop/latest.yml`：
+应用启动后自动检查 `https://shangou.muchen.store/downloads/ZhiDuoDesktop/latest.yml`：
 
 ```yaml
 version: 1.0.1
 files:
-  - url: 易聊通 Setup 1.0.1.exe
+  - url: 智朵 Setup 1.0.1.exe
     sha512: abcd1234...
     size: 87654321
 ```

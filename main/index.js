@@ -4,6 +4,14 @@ const handlers = require('./ipc-handlers')
 const updater = require('./updater')
 const capture = require('./capture')
 
+// Global error handlers — prevent crash from unhandled errors (e.g. whistle child processes)
+process.on('uncaughtException', (err) => {
+  console.error('[main] uncaughtException:', err && err.message ? err.message : err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[main] unhandledRejection:', reason && reason.message ? reason.message : reason)
+})
+
 app.commandLine.appendSwitch('disable-features', 'AutomationControlled')
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 

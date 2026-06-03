@@ -1,7 +1,7 @@
 {
-  "name": "EasyChatDesktop",
+  "name": "ZhiDuoDesktop",
   "version": "1.0.1",
-  "description": "易畅聊 - 鲜花闪购运营助手",
+  "description": "智朵 - 鲜花闪购运营助手",
   "main": "main/index.js",
   "scripts": {
     "start": "node launch.js",
@@ -13,11 +13,11 @@
   "config": {
     "targetURL": "http://localhost:15000/",
     "prodURL": "https://shangou.muchen.store",
-    "updateURL": "https://shangou.muchen.store/downloads/EasyChatDesktop/"
+    "updateURL": "https://shangou.muchen.store/downloads/desktop/"
   },
   "build": {
-    "appId": "com.mc.EasyChatDesktop",
-    "productName": "易畅聊",
+    "appId": "com.zd.desktop",
+    "productName": "智朵",
     "directories": {
       "output": "dist"
     },
@@ -44,9 +44,8 @@
       "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist",
-      "notarize": {
-        "teamId": "UXWU9M7GTB"
-      },
+      "notarize": false,
+      "afterSign": "build/notarize.js",
       "target": [
         {
           "target": "dmg",
@@ -57,18 +56,18 @@
       ]
     },
     "dmg": {
-      "title": "EasyChatDesktop",
+      "title": "ZhiDuoDesktop",
       "sign": false
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "易畅聊"
+      "shortcutName": "智朵"
     },
     "publish": {
       "provider": "generic",
-      "url": "https://shangou.muchen.store/downloads/EasyChat/"
+      "url": "https://shangou.muchen.store/downloads/desktop/"
     }
   },
   "devDependencies": {

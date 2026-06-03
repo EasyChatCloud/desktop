@@ -4,6 +4,7 @@ const zlib = require('zlib')
 const path = require('path')
 const fs = require('fs')
 const http = require('http')
+const net = require('net')
 
 let mainWindow = null
 let homeWebContents = null
@@ -40,30 +41,7 @@ function clearStateFile() {
 }
 
 function recoverFromCrash() {
-  // 1. Kill any zombie processes holding our port range (8000-8020)
-  safeExec(() => {
-    try {
-      // Check each port individually to catch all processes in our range
-      for (let port = 8000; port <= 8020; port++) {
-        try {
-          const out = execSync(`netstat -ano | findstr "127.0.0.1:${port}"`, { encoding: 'utf8', timeout: 3000 })
-          const pids = new Set()
-          out.split('\n').forEach(line => {
-            const m = line.match(/LISTENING\s+(\d+)/)
-            if (m) pids.add(m[1])
-          })
-          pids.forEach(pid => {
-            // Kill ANY process holding our ports (not just electron.exe)
-            // Whistle children from previous runs may not have electron.exe as the name
-            console.log('[capture] killing zombie process on port', port, 'PID:', pid)
-            execSync(`taskkill /F /PID ${pid}`, { encoding: 'utf8', timeout: 5000 })
-          })
-        } catch (_) {}
-      }
-    } catch (_) {}
-  })
-
-  // 2. Restore system proxy if we left it dirty from a crash
+  // Restore system proxy if we left it dirty from a crash (do NOT kill other processes — just skip occupied ports)
   try {
     if (!fs.existsSync(STATE_FILE)) return
     const state = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
@@ -83,6 +61,19 @@ function safeExec(fn, fallback) {
     console.error('[capture] exec error:', e.message)
     return fallback
   }
+}
+
+// ====== Port Check ======
+
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+    server.once('error', () => resolve(false))
+    server.once('listening', () => {
+      server.close(() => resolve(true))
+    })
+    server.listen(port, '127.0.0.1')
+  })
 }
 
 // ====== System Proxy (Windows) ======
@@ -427,6 +418,12 @@ async function startCapture(urls) {
   try {
     const whistle = require('whistle')
     for (let tryPort = 8000; tryPort <= 8020; tryPort++) {
+      // Fast pre-check: skip occupied ports immediately (<50ms vs 8s timeout)
+      const available = await isPortAvailable(tryPort)
+      if (!available) {
+        console.log('[capture] port', tryPort, 'occupied, trying next...')
+        continue
+      }
       try {
         const result = await new Promise((resolve, reject) => {
           let settled = false
@@ -461,10 +458,10 @@ async function startCapture(urls) {
           }
           setTimeout(() => {
             if (settled) return
-            // Timeout — server didn't start (port likely occupied)
+            // Timeout — server didn't start (unexpected hang)
             settled = true
-            reject(new Error('EADDRINUSE port ' + tryPort))
-          }, 8000)
+            reject(new Error('timeout port ' + tryPort))
+          }, 2000)
         })
         // Success — verify server is actually listening
         const serverObj = (result && result.server) ? result.server : result
