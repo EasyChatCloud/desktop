@@ -210,6 +210,16 @@ function createHomeViewForTab(tabId) {
 
   mainWindow.addBrowserView(view)
   setupViewEvents(view, tabId)
+
+  // Allow window.open() to create popup windows in home view
+  view.webContents.setWindowOpenHandler(() => ({
+    action: 'allow',
+    overrideBrowserWindowOptions: {
+      parent: null,
+      webPreferences: getHomeWebPreferences(ses)
+    }
+  }))
+
   view.webContents.loadURL(homeUrl)
 
   tabViews.set(tabId, { view, type: 'home', url: homeUrl, originalUrl: homeUrl })
@@ -343,6 +353,15 @@ function createPopupWindow(sessionId, url, title) {
   popupWin.setMenuBarVisibility(false)
   popupWin.webContents.setAudioMuted(true)
   popupWin.maximize()
+
+  // Allow window.open() in popup windows
+  popupWin.webContents.setWindowOpenHandler(() => ({
+    action: 'allow',
+    overrideBrowserWindowOptions: {
+      parent: null,
+      webPreferences: getWebPreferences(ses, domain)
+    }
+  }))
 
   // Set Chrome UA to match tab sessions
   ses.setUserAgent(

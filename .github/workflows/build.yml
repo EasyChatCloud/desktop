@@ -63,6 +63,13 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k tmp1234 build.keychain
           rm dev-id-app.p12
 
+      # Unlock login keychain (notarytool needs it even with --apple-id/--password flags)
+      - name: Unlock keychains
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          security unlock-keychain -p tmp1234 build.keychain 2>/dev/null || true
+
       # Build & sign (tags: sign + notarize, PRs: unsigned)
       - name: Build macOS
         env:
@@ -70,6 +77,10 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # Prefer API key for notarization (CI-friendly, no 2FA/expiry)
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ startsWith(github.ref, 'refs/tags/v') }}
         run: |
           if [ "$CSC_IDENTITY_AUTO_DISCOVERY" = "true" ]; then

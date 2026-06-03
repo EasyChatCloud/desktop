@@ -254,7 +254,9 @@ function httpGetJSON(url) {
 }
 
 function connectPolling() {
-  seenIds = new Set()
+  // Track seen request IDs with their last-known response body size.
+  // When body size increases (streamed/chunked), re-push the updated data.
+  const seenSizes = new Map()
 
   async function doPoll() {
     if (!captureActive) return
@@ -262,17 +264,24 @@ function connectPolling() {
       // Use bulk get-data — includes all request data with bodies
       const summary = await httpGetJSON(`http://127.0.0.1:${capturePort}/cgi-bin/get-data`)
       const allData = (summary.data && summary.data.data) || {}
+      // Process IDs that are new or updated since last poll
+      const freshIds = (summary.data && summary.data.ids) || []
+      const newIds = (summary.data && summary.data.newIds) || []
 
-      for (const id of Object.keys(allData)) {
+      for (const id of new Set([...freshIds, ...newIds])) {
         if (!captureActive) return
-        if (seenIds.has(id)) continue
 
         const reqData = allData[id]
         if (!reqData) continue
 
         const resStatus = (reqData.res || {}).statusCode || 0
         if (!resStatus) continue
-        seenIds.add(id)
+
+        // Track body size to re-push when data grows (chunked response)
+        const resBase64 = (reqData.res || {}).base64 || ''
+        const currentSize = resBase64.length
+        if (seenSizes.get(id) === currentSize) continue
+        seenSizes.set(id, currentSize)
 
         const url = reqData.url || ''
         let hostname = ''
@@ -298,10 +307,10 @@ function connectPolling() {
           duration: reqData.ttfb || 0,
           reqHeaders: (reqData.req || {}).headers || {},
           reqSize: (reqData.req || {}).size || 0,
-          reqBody: truncateBody(reqBody),
+          reqBody: decodeBody(reqData.req),
           resHeaders: (reqData.res || {}).headers || {},
           resSize: (reqData.res || {}).size || 0,
-          resBody: truncateBody(resBody)
+          resBody: decodeBody(reqData.res)
         })
       }
     } catch (_) {}
@@ -314,21 +323,46 @@ function connectPolling() {
     try {
       return Buffer.from(String(raw).replace(/\s/g, ''), 'base64').toString('utf8')
     } catch (_) {
-      return String(raw).slice(0, 4096)
+      return String(raw).slice(0, 512 * 1024)
     }
   }
 
   doPoll()
   pollTimer = setInterval(doPoll, 2000)
-  return { stop: () => { clearInterval(pollTimer); pollTimer = null; seenIds.clear() } }
+  return { stop: () => { clearInterval(pollTimer); pollTimer = null; seenSizes.clear() } }
 }
 
 function truncateBody(body, maxLen) {
-  maxLen = maxLen || 4096
+  maxLen = maxLen || 512 * 1024   // 512KB default, was 4096
   if (!body) return ''
   const str = typeof body === 'string' ? body : JSON.stringify(body)
   if (str.length <= maxLen) return str
   return str.slice(0, maxLen) + `... [TRUNCATED ${str.length - maxLen} bytes]`
+}
+
+// ====== HTTPS Interception API ======
+
+function enableInterceptHttps(port) {
+  const postData = `clientId=${Date.now()}-1&interceptHttpsConnects=1`
+  const req = http.request({
+    hostname: '127.0.0.1',
+    port,
+    path: '/cgi-bin/intercept-https-connects',
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      'Content-Length': Buffer.byteLength(postData)
+    }
+  }, (res) => {
+    let body = ''
+    res.on('data', chunk => { body += chunk })
+    res.on('end', () => {
+      console.log('[capture] intercept-https-connects API response:', res.statusCode, body.trim())
+    })
+  })
+  req.on('error', (e) => console.error('[capture] intercept-https-connects API error:', e.message))
+  req.write(postData)
+  req.end()
 }
 
 // ====== Core API ======
@@ -377,6 +411,19 @@ async function startCapture(urls) {
   let port = 0
   let whistleResult = null
 
+  // Clean stale Default rules file from previous runs (e.g. bad * enableHttps rule)
+  const whistleBaseDir = path.join(app.getPath('userData'), 'whistle-data')
+  safeExec(() => {
+    const defaultRulesFile = path.join(whistleBaseDir, 'rules', 'Default')
+    if (fs.existsSync(defaultRulesFile)) {
+      const content = fs.readFileSync(defaultRulesFile, 'utf-8')
+      if (content.includes('enableHttps') || content.includes('enablehttps')) {
+        fs.unlinkSync(defaultRulesFile)
+        console.log('[capture] cleaned stale Default rules:', content.trim())
+      }
+    }
+  })
+
   try {
     const whistle = require('whistle')
     for (let tryPort = 8000; tryPort <= 8020; tryPort++) {
@@ -386,7 +433,7 @@ async function startCapture(urls) {
           let errorListener = null
           const srv = whistle({
             port: tryPort,
-            baseDir: path.join(app.getPath('userData'), 'whistle-data'),
+            baseDir: whistleBaseDir,
             copy: true,
             debug: false
           }, (cbResult) => {
@@ -432,13 +479,8 @@ async function startCapture(urls) {
         whistleWebPath = (result && result.config && result.config.WEBUI_PATH) || ''
         console.log('[capture] whistle started on port', port, 'web path:', whistleWebPath)
 
-        // 8.5 Enable HTTPS interception (auto)
-        safeExec(() => {
-          if (whistleServer && whistleServer.rulesUtil) {
-            whistleServer.rulesUtil.addRules('* enableHttps', false)
-            console.log('[capture] HTTPS interception enabled via rules')
-          }
-        })
+        // Enable HTTPS interception via Whistle API
+        enableInterceptHttps(port)
 
         break
       } catch (e) {

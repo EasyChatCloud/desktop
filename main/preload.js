@@ -22,7 +22,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: (urls) => ipcRenderer.invoke('capture:start', urls || []),
     stop: () => ipcRenderer.invoke('capture:stop'),
     push: (type, callback) => {
-      ipcRenderer.on(`capture:push:${type}`, (_, data) => callback(data))
+      const channel = `capture:push:${type}`
+      ipcRenderer.removeAllListeners(channel)
+      ipcRenderer.on(channel, (_, data) => callback(data))
     }
   },
 
