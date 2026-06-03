@@ -11,7 +11,6 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   console.error('[main] unhandledRejection:', reason && reason.message ? reason.message : reason)
 })
-
 app.commandLine.appendSwitch('disable-features', 'AutomationControlled')
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled')
 

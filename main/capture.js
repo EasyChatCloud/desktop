@@ -314,7 +314,6 @@ function truncateBody(body, maxLen) {
 function isCertInstalled(certPath) {
   if (!certPath || !fs.existsSync(certPath)) return false
   if (isWin) {
-    // certutil -verifystore checks if the cert is already in the store
     return safeExec(() => {
       const thumbprint = getCertThumbprint(certPath)
       if (!thumbprint) return false
@@ -322,29 +321,14 @@ function isCertInstalled(certPath) {
       return true
     }, false)
   }
-  // macOS: check if cert is in login keychain
-  return safeExec(() => {
-    const cn = getCertCN(certPath)
-    if (!cn) return false
-    execSync(`security find-certificate -c "${cn}" -p /Library/Keychains/System.keychain`, { encoding: 'utf8', timeout: 5000 })
-    return true
-  }, false)
+  return false
 }
 
 function getCertThumbprint(certPath) {
   return safeExec(() => {
     const out = execSync(`certutil -hashfile "${certPath}" SHA1`, { encoding: 'utf8', timeout: 5000 })
-    // certutil hashfile outputs: SHA1 hash of <file>: \n<hash>\n
     const lines = out.split('\n').map(l => l.trim()).filter(Boolean)
     return lines[1] || ''
-  }, '')
-}
-
-function getCertCN(certPath) {
-  return safeExec(() => {
-    const out = execSync(`openssl x509 -in "${certPath}" -noout -subject`, { encoding: 'utf8', timeout: 5000 })
-    const m = out.match(/CN\s*=\s*([^\n\/]+)/)
-    return m ? m[1].trim() : ''
   }, '')
 }
 
@@ -358,7 +342,6 @@ function installCert(certPath) {
   }
 
   if (isWin) {
-    // Auto-install to user's Trusted Root store (no UI)
     const ok = safeExec(() => {
       execSync(`certutil -addstore -user Root "${certPath}"`, { encoding: 'utf8', timeout: 10000 })
       return true
